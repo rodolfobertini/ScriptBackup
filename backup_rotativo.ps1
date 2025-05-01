@@ -58,7 +58,8 @@ if (Test-Path $configPath) {
         $config = Get-Content $configPath -Raw | ConvertFrom-Json
         if (-not (Test-Path $config.pastaMonitorada) -or -not (Test-Path $config.pastaDestino) -or
             [int]$config.retention -lt 1 -or [int]$config.retention -gt 365 -or
-            [int]$config.intervaloExecucao -lt 1 -or [int]$config.intervaloExecucao -gt 1440) {
+            ([int]$config.intervaloExecucao -lt 1 -or [int]$config.intervaloExecucao -gt 1440 -and $config.modo -eq "intervalo") -or
+            ($config.horarioFixo -notmatch '^\d{2}:\d{2}$' -and $config.modo -eq "horario")) {
             $precisaConfigurar = $true
         }
     } catch {
@@ -84,8 +85,28 @@ if ($precisaConfigurar) {
     } until ($retention -match '^\d+$' -and [int]$retention -ge 1 -and [int]$retention -le 31)
 
     do {
-        $intervalo = Show-InputBox -Title "Intervalo de Execução" -Prompt "Intervalo entre backups (minutos, 1-1440)" -DefaultValue "720"
-    } until ($intervalo -match '^\d+$' -and [int]$intervalo -ge 1 -and [int]$intervalo -le 1440)
+        $modoAgendamento = Show-InputBox -Title "Modo de Agendamento" `
+            -Prompt "Digite 1 para agendar por intervalo em minutos, ou 2 para agendar em horário fixo a cada 12h (hh:mm):" `
+            -DefaultValue "1"
+    } until ($modoAgendamento -eq "1" -or $modoAgendamento -eq "2")
+
+    if ($modoAgendamento -eq "1") {
+        do {
+            $intervalo = Show-InputBox -Title "Intervalo de Execução" -Prompt "Intervalo entre backups (minutos, 1-1440)" -DefaultValue "120"
+        } until ($intervalo -match '^\d+$' -and [int]$intervalo -ge 1 -and [int]$intervalo -le 1440)
+        $configAgendamento = @{
+            modo = "intervalo"
+            intervaloExecucao = [int]$intervalo
+        }
+    } else {
+        do {
+            $horaFixa = Show-InputBox -Title "Horário Fixo" -Prompt "Digite o horário para rodar (hh:mm, 24h)" -DefaultValue "04:00"
+        } until ($horaFixa -match '^\d{2}:\d{2}$')
+        $configAgendamento = @{
+            modo = "horario"
+            horarioFixo = $horaFixa
+        }
+    }
 
     if (-not (Test-Path $pastaDestino)) {
         New-Item -Path $pastaDestino -ItemType Directory -Force | Out-Null
@@ -95,7 +116,9 @@ if ($precisaConfigurar) {
         pastaMonitorada   = $pastaMonitorada
         pastaDestino      = $pastaDestino
         retention         = [int]$retention
-        intervaloExecucao = [int]$intervalo
+        modo              = $configAgendamento.modo
+        intervaloExecucao = $configAgendamento.intervaloExecucao
+        horarioFixo       = $configAgendamento.horarioFixo
     } | ConvertTo-Json | Set-Content $configPath
 
     $config = Get-Content $configPath -Raw | ConvertFrom-Json
@@ -112,7 +135,9 @@ if ($MyInvocation.MyCommand.Path -ne $caminhoDestinoScript) {
             pastaMonitorada   = $config.pastaMonitorada
             pastaDestino      = $config.pastaDestino
             retention         = [int]$config.retention
-            intervaloExecucao = [int]$config.intervaloExecucao
+            modo              = $config.modo
+            intervaloExecucao = $config.intervaloExecucao
+            horarioFixo       = $config.horarioFixo
         } | ConvertTo-Json | Set-Content $configPath
     }
 }
@@ -122,8 +147,13 @@ $taskName = "BackupRotativoRodolfo"
 $taskExists = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 
 if (-not $taskExists) {
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-        -RepetitionInterval (New-TimeSpan -Minutes $config.intervaloExecucao)
+    if ($config.modo -eq "intervalo") {
+        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+            -RepetitionInterval (New-TimeSpan -Minutes $config.intervaloExecucao)
+    } else {
+        $hora = [datetime]::ParseExact($config.horarioFixo, "HH:mm", $null)
+        $trigger = New-ScheduledTaskTrigger -Daily -At $hora
+    }
     
     $action = New-ScheduledTaskAction -Execute "powershell.exe" `
         -Argument "-WindowStyle Hidden -File `"$caminhoDestinoScript`""
@@ -190,4 +220,6 @@ try {
     Write-Log "Erro global: $_"
     [System.Windows.MessageBox]::Show("Erro ao executar o backup rotativo: $_", "Erro no Backup", "OK", "Error") | Out-Null
 }
+
+exit
 # --- FIM DO SCRIPT ---
