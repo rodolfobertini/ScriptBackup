@@ -186,12 +186,24 @@ try {
         $infoAtual = "$($arquivoMaisRecente.Name)|$($arquivoMaisRecente.LastWriteTimeUtc.Ticks)"
         $infoAnterior = if (Test-Path $arquivoControle) { Get-Content $arquivoControle -Raw } else { $null }
 
-        if ($infoAtual -ne $infoAnterior) {
-            # Copia o arquivo mantendo o mesmo nome do arquivo original
-            $nomeBackup = $arquivoMaisRecente.Name
-            $caminhoDestino = Join-Path $config.pastaDestino $nomeBackup
+        $nomeBackup = $arquivoMaisRecente.Name
+        $caminhoDestino = Join-Path $config.pastaDestino $nomeBackup
+
+        $precisaCopiar = $true
+        if (Test-Path $caminhoDestino) {
+            # Compara tamanho e data de modificação
+            $origem = Get-Item $arquivoMaisRecente.FullName
+            $destino = Get-Item $caminhoDestino
+            if ($origem.Length -eq $destino.Length -and $origem.LastWriteTimeUtc -eq $destino.LastWriteTimeUtc) {
+                $precisaCopiar = $false
+            }
+        }
+
+        if ($infoAtual -ne $infoAnterior -and $precisaCopiar) {
             try {
                 Copy-Item -Path $arquivoMaisRecente.FullName -Destination $caminhoDestino -Force
+                # Mantém a data original do arquivo
+                (Get-Item $caminhoDestino).LastWriteTimeUtc = $arquivoMaisRecente.LastWriteTimeUtc
                 Set-Content -Path $arquivoControle -Value $infoAtual
                 Write-Log "Backup realizado: $nomeBackup"
             } catch {
