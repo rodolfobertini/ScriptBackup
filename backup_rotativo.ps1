@@ -174,6 +174,9 @@ function Write-Log($mensagem) {
     "$timestamp $mensagem" | Out-File -FilePath $logPath -Append -Encoding utf8
 }
 
+# Detecta se está rodando em modo interativo (não agendado)
+$ehInterativo = $Host.Name -ne 'ConsoleHost' -and $env:SESSIONNAME -ne 'Console'
+
 try {
     # --- LÓGICA DE BACKUP ---
     $arquivoControle = Join-Path $config.pastaDestino "ultimo_backup.txt"
@@ -227,11 +230,15 @@ try {
         Write-Log "Nenhum arquivo encontrado na pasta monitorada."
     }
 
-    [System.Windows.MessageBox]::Show("Backup rotativo concluído com sucesso!", "Backup Concluído", "OK", "Information") | Out-Null
+    if ($ehInterativo) {
+        [System.Windows.MessageBox]::Show("Backup rotativo concluído com sucesso!", "Backup Concluído", "OK", "Information") | Out-Null
+    }
 } catch {
     Write-Log "Erro global: $_"
-    [System.Windows.MessageBox]::Show("Erro ao executar o backup rotativo: $_", "Erro no Backup", "OK", "Error") | Out-Null
+    if ($ehInterativo) {
+        [System.Windows.MessageBox]::Show("Erro ao executar o backup rotativo: $_", "Erro no Backup", "OK", "Error") | Out-Null
+    }
 }
 
-exit
+exit 0
 # --- FIM DO SCRIPT ---
